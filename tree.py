@@ -100,12 +100,13 @@ class Tree(metaclass=abc.ABCMeta):
         self.max_iters = max_iters
         self.eta = eta
 
-        self.root = Node(0.0, 1.0, 0, 1)
-        self.nodes.append(self.root)
 
     def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
         self.size = 0
         progressbar = tqdm(total=self.max_iters)
+
+        self.root = Node(0.0, 1.0, 0, 1)
+        self.nodes.append(self.root)
 
         while self.size < self.max_iters:
             node = self._select_node(objective)
@@ -148,3 +149,5 @@ class Tree(metaclass=abc.ABCMeta):
         """
         Update optimum if a better solution is found
         """
+
+

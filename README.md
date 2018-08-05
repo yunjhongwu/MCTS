@@ -1,5 +1,7 @@
-# From Bandits to Monte-Carlo Tree Search
+# Monte-Carlo Tree Search
 Implementations of the algorithms described in Munos, R. (2014). From bandits to Monte-Carlo Tree Search: The optimistic principle applied to optimization and planning. *Foundations and Trends® in Machine Learning*, 7(1), 1-129.
+
+The algorithms are implemented only for finding the maximum of a function defined on [0, 1].
 
 Algorithms implemented:
   - Section 3: Optimistic optimization with known smoothness
