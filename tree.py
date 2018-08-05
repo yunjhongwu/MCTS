@@ -1,202 +1,150 @@
 from __future__ import annotations
 
-from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
+import abc
 from functools import total_ordering
+from heapq import heappush
 import numpy as np
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from heapq import heappop, heappush
-import networkx as nx
 from tqdm import tqdm
+from typing import Callable, Dict, List, Optional
 
 
 @total_ordering
-@dataclass
 class Node:
-    score: float
-    key: float
-    value: float
-    interval: Tuple[float, float]
-    depth: int
-    label: int
-    data: List[float]
-    left: Optional[Node] = None
-    right: Optional[Node] = None
-    parent: Optional[Node] = None
+    delta: Optional[Callable[..., float]] = None
+
+    def __init__(self, lower: float, upper: float, depth: int,
+                 label: int) -> None:
+        self.lower = lower
+        self.upper = upper
+        self.depth = depth
+        self.label = label
+        self.data: List[float] = list()
+        self.size: int = 0
+        self.value: float = np.inf
+        self.score: float = np.inf
+        self.parent: Optional[Node] = None
+        self._left: Optional[Node] = None
+        self._right: Optional[Node] = None
 
     def __eq__(self, other) -> bool:
         return self.score == other.score
 
     def __lt__(self, other) -> bool:
-        return self.score < other.score
+        return self.score > other.score
 
     def __str__(self) -> str:
-        return f"key: {self.key}, value: {self.value}, data: {self.data}"
+        return (f"Node {self.label}: depth: {self.depth}, "
+                f"interval: ({self.lower}, {self.upper}), "
+                f"value: {self.value}, data: {self.data}")
+
+    def collect(self, sample: float, update_time: int):
+        """
+        Calculate score
+        """
+        self.update_time = update_time
+        self.value = ((self.value * self.size + sample) / (self.size + 1)
+                      if self.size > 0 else sample)
+        self.data.append(sample)
+        self.size += 1
+        self.update_score()
+
+    def sample(self):
+        return np.random.uniform(self.lower, self.upper)
+
+    def update_score(self):
+        self.score = self.value + self.delta()
+
+    def set_value(self, value: float, size: int):
+        self.value = value
+        self.update_score()
+
+    @property
+    def mid(self):
+        return (self.lower + self.upper) * 0.5
+
+    @property
+    def left(self):
+        return self._left
+
+    @left.setter
+    def left(self, node: Node):
+        node.parent = self
+        self._left = node
+
+    @property
+    def right(self):
+        return self._right
+
+    @right.setter
+    def right(self, node: Node):
+        node.parent = self
+        self._right = node
 
 
-class Tree(metaclass=ABCMeta):
+class Tree(metaclass=abc.ABCMeta):
     """
     Tree search methods for finding the maximum of objective function on [0, 1]
     """
 
-    def __init__(self, objective: Callable[[float], float],
-                 delta: Callable[[int, int, int, float], float],
+    def __init__(self,
+                 max_iters: int,
+                 delta: Callable[[Node], float],
                  eta: float = 0.0) -> None:
+        Node.delta = delta
+
         self.nodes: List[Node] = []
         self.x_optimal: float = np.nan
-        self.f_optimal: float = np.nan
-        self.num = 1
+        self.f_optimal: float = -np.inf
         self.height = 1
-        self.graph = nx.DiGraph()
 
-        self.objective = objective
-        self.delta = delta
+        self.max_iters = max_iters
         self.eta = eta
 
-        value = self.objective(0.5)
-        delta_h = self.delta(0, 1, 1, eta)
-        self.root = Node(-(value + delta_h),
-                         0.5, value, (0.0, 1.0), 0, 1, [value])
+        self.root = Node(0.0, 1.0, 0, 1)
         self.nodes.append(self.root)
-        self.graph.add_node(1, pos=(0.5, 0))
 
-    def search(self, time_horizon: int) -> Dict[str, float]:
-        for _ in tqdm(range(time_horizon)):
-            node = self._select_node()
-            self._update_optimum(node)
+    def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
+        self.size = 0
+        progressbar = tqdm(total=self.max_iters)
+
+        while self.size < self.max_iters:
+            node = self._select_node(objective)
             self._expand(node)
+            self._update_optimum(node)
+
+            progressbar.n = min(self.size, self.max_iters)
+            progressbar.refresh()
+
+        progressbar.close()
 
         return {'x': self.x_optimal, 'obj': self.f_optimal}
 
     def _add_children(self, node: Node) -> None:
         """
         Split the corresponding cell into two intervals; for each interval,
-        evaluate its mid-point and generate a child
+        evaluate generate a child
         """
 
         depth_next = node.depth + 1
+        node.left = Node(node.lower, node.mid, depth_next, 2 * node.label)
+        node.right = Node(node.mid, node.upper, depth_next, 2 * node.label + 1)
+        heappush(self.nodes, node.left)
+        heappush(self.nodes, node.right)
 
-        node.left = self._add_child(node, 0.5 * (node.interval[0] + node.key),
-                                    2 * node.label, depth_next,
-                                    (node.interval[0], node.key))
-
-        node.right = self._add_child(node, 0.5 * (node.key + node.interval[1]),
-                                     2 * node.label + 1, depth_next,
-                                     (node.key, node.interval[1]))
-
-    def _add_child(self, node: Node, key: float, label: int,
-                   depth_next: int,
-                   interval: Tuple[float, float]) -> Node:
-        value = self.objective(key)
-        data = [value]
-        delta_h = self.delta(depth_next, self.num, len(data), self.eta)
-        node_new = Node(-(value + delta_h), key, value, interval, depth_next,
-                        label, data)
-        heappush(self.nodes, node_new)
-
-        self.graph.add_node(label, pos=(key, -depth_next))
-        self.graph.add_edge(root.label, label)
-        node_new.parent = node
-
-        return node_new
-
-    @abstractmethod
-    def _select_node(self) -> Node:
+    @abc.abstractmethod
+    def _select_node(self, objective: Callable[[float], float]) -> Node:
         """
         Select a node for expanding/sampling
         """
 
-    @abstractmethod
-    def _update_optimum(self, node: Node) -> None:
-        """
-        Update optimum if a better solution is found
-        """
-
-    @abstractmethod
+    @abc.abstractmethod
     def _expand(self, node: Node) -> None:
         """
         Add children
         """
 
-    @property
-    def optimum(self) -> Tuple[float, float]:
-        return (self.x_optimal, self.f_optimal)
-
-
-class DOO(Tree):
-    def _select_node(self) -> Node:
-        return heappop(self.nodes)
-
+    @abc.abstractmethod
     def _update_optimum(self, node: Node) -> None:
-        if node.value > self.f_optimal:
-            self.f_optimal = node.value
-            self.x_optimal = node.key
-
-    def _expand(self, node: Node) -> None:
-        self._add_children(node)
-
-
-class StoOO(Tree):
-    def _select_node(self) -> Node:
-        return heappop(self.nodes)
-
-    def _update_optimum(self, node: Node) -> None:
-        if node.depth >= self.height:
-            self.f_optimal = node.value
-            self.x_optimal = node.key
-            self.height = node.depth
-
-    def _collect_data(self, node: Node) -> None:
-        self.num += 1
-        sample = self.objective(node.key)
-        node.data.append(sample)
-        sample_size = len(node.data)
-        node.value = (node.value * (sample_size - 1) + sample) / sample_size
-
-        node.score = -(node.value + self.delta(node.depth + 1, self.num,
-                                               sample_size, self.eta))
-
-    def _expand(self, node: Node) -> None:
-        self._collect_data(node)
-        rate = (np.log(self.num * self.num / self.eta)
-                if self.eta > 0 else np.inf)
-
-        if 2 * self.delta(node.depth) ** 2 * len(node.data) >= rate:
-            self._add_children(node)
-        else:
-            heappush(self.nodes, node)
-
-
-class HOO(StoOO):
-    def _select_node(self) -> Node:
-        curr = self.root
-
-        while not (curr.left is None or curr.right is None):
-            curr = (curr.left
-                    if curr.left.score < curr.right.score
-                    else curr.right)
-
-        return curr
-
-    def _update_optimum(self, node: Node) -> None:
-        self.f_optimal = node.value
-        self.x_optimal = node.key
-
-    def _expand(self, node: Node) -> None:
-        self._collect_data(node)
-        self._add_children(node)
-        self._update_b_value(node)
-
-    def _update_b_value(self, node: Node) -> None:
-        if node is not None:
-            size = len(node.left.data) + len(node.right.data)
-            score = -(node.left.value * len(node.left.data) +
-                      node.right.value * len(node.right.data)) / size
-            score -= self.delta(node.depth, self.num, size, self.eta)
-            node.score = max(score, min(
-                node.left.score, node.right.score))
-            self._update_b_value(node.parent)
-
-    @property
-    def optimum(self) -> Tuple[float, float]:
-        return (self.x_optimal, self.f_optimal)
+        """
+        Update optimum if a better solution is found
+        """
