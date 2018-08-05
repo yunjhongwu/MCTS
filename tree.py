@@ -92,21 +92,22 @@ class Tree(metaclass=abc.ABCMeta):
                  eta: float = 0.0) -> None:
         Node.delta = delta
 
-        self.nodes: List[Node] = []
-        self.x_optimal: float = np.nan
-        self.f_optimal: float = -np.inf
-        self.height = 1
+
+
 
         self.max_iters = max_iters
         self.eta = eta
 
-
     def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
         self.size = 0
-        progressbar = tqdm(total=self.max_iters)
-
+        self.height = 1
+        self.nodes: List[Node] = []
         self.root = Node(0.0, 1.0, 0, 1)
         self.nodes.append(self.root)
+        self.x_optimal: float = np.nan
+        self.f_optimal: float = -np.inf
+
+        progressbar = tqdm(total=self.max_iters)
 
         while self.size < self.max_iters:
             node = self._select_node(objective)
@@ -149,5 +150,3 @@ class Tree(metaclass=abc.ABCMeta):
         """
         Update optimum if a better solution is found
         """
-
-
