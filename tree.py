@@ -5,7 +5,7 @@ from functools import total_ordering
 from heapq import heappush
 import numpy as np
 from tqdm import tqdm
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 @total_ordering
@@ -18,7 +18,7 @@ class Node:
         self.upper = upper
         self.depth = depth
         self.label = label
-        self.data: List[float] = list()
+        self.data: List[Tuple[float, float]] = list()
         self.size: int = 0
         self.value: float = np.inf
         self.score: float = np.inf
@@ -36,48 +36,36 @@ class Node:
                 f"interval: ({self.lower}, {self.upper}), "
                 f"value: {self.value}, data: {self.data}")
 
-    def collect(self, sample: float, update_time: int):
+    def evaluate(self,
+                 objective: Callable[[float], float],
+                 update_time: int,
+                 random_state: bool = False):
         """
         Calculate score
         """
+        key = np.random.uniform(self.lower,
+                                self.upper) if random_state else self.mid
+        sample = objective(key)
+        self.collect(key, sample, update_time)
+
+    def collect(self, key: float, sample: float, update_time: int):
         self.update_time = update_time
         self.value = ((self.value * self.size + sample) / (self.size + 1)
                       if self.size > 0 else sample)
-        self.data.append(sample)
+        self.data.append((key, sample))
         self.size += 1
         self.update_score()
-
-    def sample(self):
-        return np.random.uniform(self.lower, self.upper)
 
     def update_score(self):
         self.score = self.value + self.delta()
 
-    def set_value(self, value: float, size: int):
-        self.value = value
-        self.update_score()
+    def add_child(self, node: Node):
+        node.parent = self
+        self.children.append(node)
 
     @property
     def mid(self):
         return (self.lower + self.upper) * 0.5
-
-    @property
-    def left(self):
-        return self._left
-
-    @left.setter
-    def left(self, node: Node):
-        node.parent = self
-        self._left = node
-
-    @property
-    def right(self):
-        return self._right
-
-    @right.setter
-    def right(self, node: Node):
-        node.parent = self
-        self._right = node
 
 
 class Tree(metaclass=abc.ABCMeta):
@@ -131,10 +119,9 @@ class Tree(metaclass=abc.ABCMeta):
         width = (node.upper - node.lower) / self.num_of_children
         for i in range(self.num_of_children):
             label = node.label * self.num_of_children + i + 1
-
             child = Node(node.lower + i * width, node.lower + (i + 1) * width,
                          depth_next, label)
-            node.children.append(child)
+            node.add_child(child)
             heappush(self.nodes, child)
 
     @abc.abstractmethod

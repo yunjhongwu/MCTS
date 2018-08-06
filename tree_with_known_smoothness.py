@@ -13,7 +13,7 @@ class DOO(Tree):
 
         while np.isinf(node.value):
             self.size += 1
-            node.collect(objective(node.mid), self.size)
+            node.evaluate(objective, self.size)
             heappush(self.nodes, node)
             node = heappop(self.nodes)
 
@@ -43,7 +43,7 @@ class StoOO(Tree):
     def _select_node(self, objective: Callable[[float], float]) -> Node:
         self.size += 1
         node = heappop(self.nodes)
-        node.collect(objective(node.mid), self.size)
+        node.evaluate(objective, self.size)
 
         return node
 
@@ -69,7 +69,7 @@ class HOO(StoOO):
 
         def upper_bound(node: Node, rate: float = self.rate) -> float:
             return delta(node) + np.sqrt(
-                2 * np.log(node.update_time) / len(node.data))
+                2 * np.log(node.update_time) / node.size)
 
         super().__init__(max_iters, num_of_children, upper_bound, eta)
 
@@ -77,19 +77,21 @@ class HOO(StoOO):
         curr = self.root
 
         while len(curr.children) > 0:
-            idx = np.argmax(curr.children)
+            idx = np.argmin(curr.children)
             curr = curr.children[idx]
 
         self.size += 1
-        curr.collect(objective(curr.sample()), self.size)
+        curr.evaluate(objective, self.size, random_state=True)
+
         return curr
 
     def _expand(self, node: Node) -> None:
         self._add_children(node)
         while len(node.data) > 0:
-            obs = node.data.pop()
-            idx = np.argmax(node.children)
-            node.children[idx].collect(obs, self.size)
+            key, sample = node.data.pop()
+            idx = int((key - node.lower) / (node.upper - node.lower) *
+                      self.num_of_children)
+            node.children[idx].collect(key, sample, self.size)
 
         self._update_b_value(node)
 
@@ -100,14 +102,14 @@ class HOO(StoOO):
     def _update_b_value(self, node: Optional[Node]) -> None:
         if node is not None:
             size = sum(child.size for child in node.children)
-            total = sum(child.size * node.value 
-                        for child in node.children if node.size > 0)
+            total = sum(child.size * child.value for child in node.children
+                        if child.size > 0)
 
             value = total / size
             node.value = value
             node.size = size
 
             node.score = min(
-                value + np.sqrt(2 * np.log(node.update_time) / size),
-                max(child.score for child in node.children))
+                value + np.sqrt(2 * np.log(self.size) / size) +
+                self.delta(node), max(child.score for child in node.children))
             self._update_b_value(node.parent)

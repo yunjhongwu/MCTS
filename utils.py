@@ -19,9 +19,9 @@ def visualize(tree: Tree, fun: Callable[[float], float]) -> None:
     while len(queue):
         node = queue.pop()
 
-        values.extend((node.mid, val) for val in node.data)
+        values.extend(node.data)
         pos[node.label] = (node.mid, -node.depth)
-        for child in (node.left, node.right):
+        for child in node.children:
             if child is not None and np.isfinite(child.value):
                 queue.append(child)
                 graph.add_edge(node.label, child.label)
