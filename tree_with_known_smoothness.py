@@ -29,8 +29,8 @@ class DOO(Tree):
 
 
 class StoOO(Tree):
-    def __init__(self, max_iters: int, delta: Callable[[Node], float],
-                 eta: float) -> None:
+    def __init__(self, max_iters: int, num_of_children: int,
+                 delta: Callable[[Node], float], eta: float) -> None:
         assert eta > 0, "Eta must be strictly positive."
         self.delta = delta
         self.rate = np.sqrt(np.log(max_iters * max_iters / eta) * 0.5)
@@ -38,7 +38,7 @@ class StoOO(Tree):
         def upper_bound(node: Node, rate: float = self.rate) -> float:
             return delta(node) + rate / np.sqrt(len(node.data))
 
-        super().__init__(max_iters, upper_bound, eta)
+        super().__init__(max_iters, num_of_children, upper_bound, eta)
 
     def _select_node(self, objective: Callable[[float], float]) -> Node:
         self.size += 1
@@ -61,8 +61,8 @@ class StoOO(Tree):
 
 
 class HOO(StoOO):
-    def __init__(self, max_iters: int, delta: Callable[[Node], float],
-                 eta: float) -> None:
+    def __init__(self, max_iters: int, num_of_children: int,
+                 delta: Callable[[Node], float], eta: float) -> None:
         assert eta > 0, "Eta must be strictly positive."
         self.delta = delta
         self.rate = np.sqrt(np.log(max_iters * max_iters / eta) * 0.5)
@@ -71,14 +71,14 @@ class HOO(StoOO):
             return delta(node) + np.sqrt(
                 2 * np.log(node.update_time) / len(node.data))
 
-        super().__init__(max_iters, upper_bound, eta)
+        super().__init__(max_iters, num_of_children, upper_bound, eta)
 
     def _select_node(self, objective: Callable[[float], float]) -> Node:
         curr = self.root
 
-        while not (curr.left is None or curr.right is None):
-            curr = (curr.left
-                    if curr.left.score > curr.right.score else curr.right)
+        while len(curr.children) > 0:
+            idx = np.argmax(curr.children)
+            curr = curr.children[idx]
 
         self.size += 1
         curr.collect(objective(curr.sample()), self.size)
@@ -88,8 +88,8 @@ class HOO(StoOO):
         self._add_children(node)
         while len(node.data) > 0:
             obs = node.data.pop()
-            (node.right
-             if obs > node.mid else node.left).collect(obs, self.size)
+            idx = np.argmax(node.children)
+            node.children[idx].collect(obs, self.size)
 
         self._update_b_value(node)
 
@@ -99,18 +99,15 @@ class HOO(StoOO):
 
     def _update_b_value(self, node: Optional[Node]) -> None:
         if node is not None:
+            size = sum(child.size for child in node.children)
+            total = sum(child.size * node.value 
+                        for child in node.children if node.size > 0)
 
-            size = node.left.size + node.right.size
-            left_sum = (node.left.value * node.left.size
-                        if node.left.size > 0 else 0)
-            right_sum = (node.right.value * node.right.size
-                         if node.right.size > 0 else 0)
-
-            value = (left_sum + right_sum) / size
+            value = total / size
             node.value = value
             node.size = size
 
             node.score = min(
                 value + np.sqrt(2 * np.log(node.update_time) / size),
-                max(node.left.score, node.right.score))
+                max(child.score for child in node.children))
             self._update_b_value(node.parent)
