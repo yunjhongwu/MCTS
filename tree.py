@@ -2,28 +2,29 @@ from __future__ import annotations
 
 import abc
 from functools import total_ordering
+from dataclasses import dataclass, field
 from heapq import heappush
 import numpy as np
 from tqdm import tqdm
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, ClassVar, Dict, List, Optional, Tuple
 
 
 @total_ordering
+@dataclass
 class Node:
-    delta: Optional[Callable[..., float]] = lambda dummy: 0.0
+    tree: ClassVar[BaseTree] 
+    delta: ClassVar[Callable[..., float]] = lambda dummy: 0.0
 
-    def __init__(self, lower: float, upper: float, depth: int,
-                 label: int) -> None:
-        self.lower = lower
-        self.upper = upper
-        self.depth = depth
-        self.label = label
-        self.data: List[Tuple[float, float]] = list()
-        self.size: int = 0
-        self.value: float = np.inf
-        self.score: float = np.inf
-        self.parent: Optional[Node] = None
-        self.children: List[Node] = []
+    lower: float
+    upper: float
+    depth: int
+    label: int
+    data: List[Tuple[float, float]] = field(default_factory=list)
+    size: int = 0
+    value: float = np.inf
+    score: float = np.inf
+    parent: Optional[Node] = None
+    children: List[Node] = field(default_factory=list)
 
     def __eq__(self, other) -> bool:
         return self.score == other.score
@@ -38,7 +39,6 @@ class Node:
 
     def evaluate(self,
                  objective: Callable[[float], float],
-                 update_time: int,
                  random_state: bool = False):
         """
         Calculate score
@@ -46,10 +46,9 @@ class Node:
         key = np.random.uniform(self.lower,
                                 self.upper) if random_state else self.mid
         sample = objective(key)
-        self.collect(key, sample, update_time)
+        self.collect(key, sample)
 
-    def collect(self, key: float, sample: float, update_time: int):
-        self.update_time = update_time
+    def collect(self, key: float, sample: float):
         self.value = ((self.value * self.size + sample) / (self.size + 1)
                       if self.size > 0 else sample)
         self.data.append((key, sample))
@@ -68,70 +67,27 @@ class Node:
         return (self.lower + self.upper) * 0.5
 
 
-class Tree(metaclass=abc.ABCMeta):
+class BaseTree(metaclass=abc.ABCMeta):
     """
     Tree search methods for finding the maximum of objective function on [0, 1]
     """
 
-    def __init__(self,
-                 max_iters: int,
-                 num_of_children: int,
-                 delta: Callable[[Node], float],
-                 eta: float = 0.0) -> None:
-        assert num_of_children > 1, "Number of children must be greater 1."
-        Node.delta = delta
-        self.max_iters = max_iters
-        self.num_of_children = num_of_children
-        self.eta = eta
-
-    def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
-        self._initialize()
-        progressbar = tqdm(total=self.max_iters)
-
-        while self.size < self.max_iters:
-            node = self._select_node(objective)
-            self._expand(node)
-            self._update_optimum(node)
-
-            progressbar.n = min(self.size, self.max_iters)
-            progressbar.refresh()
-
-        progressbar.close()
-
-        return {'x': self.x_optimal, 'obj': self.f_optimal}
-
     def _initialize(self) -> None:
         self.size = 0
         self.height = 1
-        self.nodes: List[Node] = []
-        self.root = Node(0.0, 1.0, 0, 0)
-        self.nodes.append(self.root)
+        self.root = Node(0.0, 1.0, 0, 1)
         self.x_optimal: float = np.nan
         self.f_optimal: float = -np.inf
 
-    def _add_children(self, node: Node) -> None:
-        """
-        Split the corresponding cell into two intervals; for each interval,
-        evaluate generate a child
-        """
-
-        depth_next = node.depth + 1
-        width = (node.upper - node.lower) / self.num_of_children
-        for i in range(self.num_of_children):
-            label = node.label * self.num_of_children + i + 1
-            child = Node(node.lower + i * width, node.lower + (i + 1) * width,
-                         depth_next, label)
-            node.add_child(child)
-            heappush(self.nodes, child)
-
     @abc.abstractmethod
-    def _select_node(self, objective: Callable[[float], float]) -> Node:
+    def _select_node(self, queue: List[Node],
+                     objective: Callable[[float], float]) -> Node:
         """
         Select a node for expanding/sampling
         """
 
     @abc.abstractmethod
-    def _expand(self, node: Node) -> None:
+    def _expand(self, node: Node, objective: Callable[[float], float]) -> None:
         """
         Add children
         """
@@ -141,3 +97,110 @@ class Tree(metaclass=abc.ABCMeta):
         """
         Update optimum if a better solution is found
         """
+
+
+class OOTree(BaseTree):
+    def __init__(self,
+                 max_iters: int,
+                 num_of_children: int,
+                 delta: Callable[[Node], float]) -> None:
+        assert num_of_children > 1, "Number of children must be greater 1."
+
+        Node.delta = delta
+        Node.tree = self
+        self.max_iters = max_iters
+        self.num_of_children = num_of_children
+
+    def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
+        self._initialize()
+
+        self.nodes: List[Node] = [self.root]
+
+        progressbar = tqdm(total=self.max_iters)
+
+        while self.size < self.max_iters:
+            node = self._select_node(self.nodes, objective)
+            self._expand(node, objective)
+            self._update_optimum(node)
+
+            progressbar.n = min(self.size, self.max_iters)
+            progressbar.refresh()
+
+        progressbar.close()
+
+        return {'x': self.x_optimal, 'obj': self.f_optimal}
+
+    def _add_children(self, node: Node) -> None:
+        """
+        Split the corresponding cell into two intervals; for each interval,
+        generate a child
+        """
+
+        depth_next = node.depth + 1
+        width = (node.upper - node.lower) / self.num_of_children
+        for i in range(self.num_of_children):
+            label = node.label * self.num_of_children + i
+            child = Node(node.lower + i * width, node.lower + (i + 1) * width,
+                         depth_next, label)
+            node.add_child(child)
+            heappush(self.nodes, child)
+
+
+class SOOTree(BaseTree):
+    def __init__(self, max_iters: int, num_of_children: int,
+                 h_max: Callable[[int], int]) -> None:
+        Node.tree = self
+        self.h_max = h_max
+        self.num_of_children = num_of_children
+        self.max_iters = max_iters
+
+    def search(self, objective: Callable[[float], float]) -> Dict[str, float]:
+        self._initialize()
+        self.root.evaluate(objective)
+        self.nodes = [[self.root]]
+
+        progressbar = tqdm()
+        scope = 0
+        height_bound = 1
+        while scope < height_bound and self.size < self.max_iters:
+            v_max = -np.inf
+            for h in range(0, height_bound):
+                if len(self.nodes[h]) > 0:
+                    node = self._select_node(self.nodes[h], objective)
+                    if node.score >= v_max:
+                        v_max = node.value
+                        self._expand(node, objective)
+                        self._update_optimum(node)
+
+                        height_bound = min(self.height, self.h_max(self.size))
+
+                else:
+                    scope = h + 1
+
+            progressbar.n = min(self.size, self.max_iters)
+            progressbar.refresh()
+
+        progressbar.close()
+
+        return {'x': self.x_optimal, 'obj': self.f_optimal}
+
+    def _add_children(self, node: Node,
+                      objective: Callable[[float], float]) -> None:
+        """
+        Split the corresponding cell into two intervals; for each interval,
+        generate and evaluate a child
+        """
+
+        depth_next = node.depth + 1
+        if depth_next >= len(self.nodes):
+            self.nodes.append([])
+            self.height += 1
+
+        width = (node.upper - node.lower) / self.num_of_children
+        for i in range(self.num_of_children):
+            label = node.label * self.num_of_children + i + 1
+            child = Node(node.lower + i * width, node.lower + (i + 1) * width,
+                         depth_next, label)
+            child.evaluate(objective)
+            node.add_child(child)
+            heappush(self.nodes[depth_next], child)
