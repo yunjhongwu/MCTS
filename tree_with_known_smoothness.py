@@ -92,13 +92,13 @@ class HOO(OOTree):
     def _expand(self, node: Node, objective: Callable[[float], float]) -> None:
         self._add_children(node)
         self.non_leaves.append(node)
+
         while len(node.data) > 0:
             key, sample = node.data.pop()
             idx = int((key - node.lower) / (node.upper - node.lower) *
                       self.num_of_children)
             node.children[idx].collect(key, sample)
-            
-
+           
         self._update_b_value(node)
 
     def _update_optimum(self, node: Node) -> None:

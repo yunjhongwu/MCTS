@@ -3,10 +3,10 @@ import networkx as nx
 import numpy as np
 from typing import Callable, Dict, List, Tuple
 
-from tree import Tree, Node
+from tree import BaseTree, Node
 
 
-def visualize(tree: Tree, fun: Callable[[float], float]) -> None:
+def visualize(tree: BaseTree, fun: Callable[[float], float]) -> None:
     fig, ax = plt.subplots(
         2, 1, figsize=(20, 12), gridspec_kw={'height_ratios': [3, 1]})
     fig.tight_layout()

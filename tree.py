@@ -73,7 +73,7 @@ class BaseTree(metaclass=abc.ABCMeta):
     """
 
     def _initialize(self) -> None:
-        self.size = 0
+        self.size = 1
         self.height = 1
         self.root = Node(0.0, 1.0, 0, 1)
         self.x_optimal: float = np.nan
@@ -87,9 +87,9 @@ class BaseTree(metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
-    def _expand(self, node: Node, objective: Callable[[float], float]) -> None:
+    def _expand(self, node: Node, objective: Callable[[float], float]) -> bool:
         """
-        Add children
+        Return True if children are added
         """
 
     @abc.abstractmethod
@@ -123,9 +123,11 @@ class OOTree(BaseTree):
             self._expand(node, objective)
             self._update_optimum(node)
 
-            progressbar.n = min(self.size, self.max_iters)
+            progressbar.n = self.size
             progressbar.refresh()
 
+        progressbar.n = self.max_iters
+        progressbar.refresh()
         progressbar.close()
 
         return {'x': self.x_optimal, 'obj': self.f_optimal}
@@ -159,27 +161,31 @@ class SOOTree(BaseTree):
         self.root.evaluate(objective)
         self.nodes = [[self.root]]
 
-        progressbar = tqdm()
+        progressbar = tqdm(total=self.max_iters)
         scope = 0
         height_bound = 1
+
         while scope < height_bound and self.size < self.max_iters:
             v_max = -np.inf
-            for h in range(0, height_bound):
+        
+            for h in range(scope, height_bound):
                 if len(self.nodes[h]) > 0:
                     node = self._select_node(self.nodes[h], objective)
                     if node.score >= v_max:
-                        v_max = node.value
-                        self._expand(node, objective)
-                        self._update_optimum(node)
+                        v_max = node.score
+                        if self._expand(node, objective):
+                            self._update_optimum(node)
 
                         height_bound = min(self.height, self.h_max(self.size))
-
+                        
                 else:
                     scope = h + 1
 
-            progressbar.n = min(self.size, self.max_iters)
+            progressbar.n = self.size
             progressbar.refresh()
 
+        progressbar.n = self.max_iters
+        progressbar.refresh()
         progressbar.close()
 
         return {'x': self.x_optimal, 'obj': self.f_optimal}
@@ -197,6 +203,7 @@ class SOOTree(BaseTree):
             self.height += 1
 
         width = (node.upper - node.lower) / self.num_of_children
+
         for i in range(self.num_of_children):
             label = node.label * self.num_of_children + i + 1
             child = Node(node.lower + i * width, node.lower + (i + 1) * width,
@@ -204,3 +211,4 @@ class SOOTree(BaseTree):
             child.evaluate(objective)
             node.add_child(child)
             heappush(self.nodes[depth_next], child)
+            self.size += 1

@@ -8,11 +8,11 @@ Algorithms implemented:
     - Deterministic Optimistic Optimization (DOO)
     - Stochastic Optimistic Optimization (StoOO)
     - Hierarchical Optimistic Optimization (HOO)
-
-Algorithms to implement:
   - Section 4: Simultaneous Optimistic Optimization
     - Simultaneous Optimistic Optimization (SOO)
     - Stochastic Simultaneous Optimistic Optimization (StoSOO)
+
+Algorithms to implement:
   - Section 5: Optimistic planning
     - Optimistic Planning algorithm (OPD)
     - Open Loop Optimistic Planning (OLOP)
